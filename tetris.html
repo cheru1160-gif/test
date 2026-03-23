@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>テトリス</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #111;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    font-family: monospace;
+    color: #fff;
+  }
+  #wrapper {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+  }
+  canvas {
+    border: 2px solid #444;
+    display: block;
+  }
+  #info {
+    width: 140px;
+    padding-top: 4px;
+  }
+  #info h2 { color: #aaa; font-size: 13px; margin-bottom: 4px; }
+  #info .val { font-size: 22px; margin-bottom: 16px; }
+  #next-canvas { border: 1px solid #333; background: #1a1a1a; display: block; margin-bottom: 20px; }
+  #keys { color: #666; font-size: 12px; line-height: 1.8; }
+  #keys span { color: #999; }
+  #overlay {
+    position: absolute;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+  #overlay h1 { font-size: 28px; color: #fff; }
+  #overlay p { font-size: 14px; color: #aaa; }
+  #board-wrap { position: relative; display: inline-block; }
+</style>
+</head>
+<body>
+<div id="wrapper">
+  <div id="board-wrap">
+    <canvas id="board"></canvas>
+    <div id="overlay">
+      <h1 id="overlay-title"></h1>
+      <p id="overlay-sub"></p>
+    </div>
+  </div>
+  <div id="info">
+    <canvas id="next-canvas" width="120" height="100"></canvas>
+    <h2>SCORE</h2>
+    <div class="val" id="score">0</div>
+    <h2>LEVEL</h2>
+    <div class="val" id="level">1</div>
+    <h2>LINES</h2>
+    <div class="val" id="lines">0</div>
+    <div id="keys">
+      <span>← →</span> 移動<br>
+      <span>↑ / X</span> 右回転<br>
+      <span>Z</span> 左回転<br>
+      <span>↓</span> 高速落下<br>
+      <span>Space</span> ハードドロップ<br>
+      <span>P</span> ポーズ<br>
+      <span>R</span> リスタート
+    </div>
+  </div>
+</div>
+
+<script>
+const COLS = 10, ROWS = 20, SZ = 34;
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+canvas.width = COLS * SZ;
+canvas.height = ROWS * SZ;
+
+const nextCanvas = document.getElementById('next-canvas');
+const nctx = nextCanvas.getContext('2d');
+
+const overlay = document.getElementById('overlay');
+
+const COLORS = [
+  null,
+  '#00f0f0', // I
+  '#f0f000', // O
+  '#a000f0', // T
+  '#00f000', // S
+  '#f00000', // Z
+  '#0000f0', // J
+  '#f0a000', // L
+];
+
+const PIECES = {
+  I: { color: 1, shapes: [
+    [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+    [[0,0,1,0],[0,0,1,0],[0,0,1,0],[0,0,1,0]],
+    [[0,0,0,0],[0,0,0,0],[1,1,1,1],[0,0,0,0]],
+    [[0,1,0,0],[0,1,0,0],[0,1,0,0],[0,1,0,0]],
+  ]},
+  O: { color: 2, shapes: [
+    [[0,1,1,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,1,1,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,1,1,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,1,1,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]],
+  ]},
+  T: { color: 3, shapes: [
+    [[0,1,0],[1,1,1],[0,0,0]],
+    [[0,1,0],[0,1,1],[0,1,0]],
+    [[0,0,0],[1,1,1],[0,1,0]],
+    [[0,1,0],[1,1,0],[0,1,0]],
+  ]},
+  S: { color: 4, shapes: [
+    [[0,1,1],[1,1,0],[0,0,0]],
+    [[0,1,0],[0,1,1],[0,0,1]],
+    [[0,0,0],[0,1,1],[1,1,0]],
+    [[1,0,0],[1,1,0],[0,1,0]],
+  ]},
+  Z: { color: 5, shapes: [
+    [[1,1,0],[0,1,1],[0,0,0]],
+    [[0,0,1],[0,1,1],[0,1,0]],
+    [[0,0,0],[1,1,0],[0,1,1]],
+    [[0,1,0],[1,1,0],[1,0,0]],
+  ]},
+  J: { color: 6, shapes: [
+    [[1,0,0],[1,1,1],[0,0,0]],
+    [[0,1,1],[0,1,0],[0,1,0]],
+    [[0,0,0],[1,1,1],[0,0,1]],
+    [[0,1,0],[0,1,0],[1,1,0]],
+  ]},
+  L: { color: 7, shapes: [
+    [[0,0,1],[1,1,1],[0,0,0]],
+    [[0,1,0],[0,1,0],[0,1,1]],
+    [[0,0,0],[1,1,1],[1,0,0]],
+    [[1,1,0],[0,1,0],[0,1,0]],
+  ]},
+};
+
+const NAMES = Object.keys(PIECES);
+
+function randomPiece() {
+  const name = NAMES[Math.floor(Math.random() * NAMES.length)];
+  const p = PIECES[name];
+  return { name, color: p.color, shapes: p.shapes, rot: 0,
+           x: Math.floor(COLS / 2) - Math.floor(p.shapes[0][0].length / 2), y: 0 };
+}
+
+function getCells(piece) {
+  const shape = piece.shapes[piece.rot];
+  const cells = [];
+  for (let r = 0; r < shape.length; r++)
+    for (let c = 0; c < shape[r].length; c++)
+      if (shape[r][c]) cells.push([piece.x + c, piece.y + r]);
+  return cells;
+}
+
+let board, current, next, score, level, lines, gameOver, paused, fallTimer, fallSpeed;
+
+function init() {
+  board = Array.from({length: ROWS}, () => Array(COLS).fill(0));
+  current = randomPiece();
+  next = randomPiece();
+  score = 0; level = 1; lines = 0;
+  gameOver = false; paused = false;
+  fallTimer = 0;
+  fallSpeed = getFallSpeed();
+  overlay.style.display = 'none';
+  updateInfo();
+}
+
+function getFallSpeed() { return Math.max(100, 800 - (level - 1) * 70); }
+
+function isValid(piece) {
+  for (const [x, y] of getCells(piece)) {
+    if (x < 0 || x >= COLS || y >= ROWS) return false;
+    if (y >= 0 && board[y][x]) return false;
+  }
+  return true;
+}
+
+function lock() {
+  for (const [x, y] of getCells(current))
+    if (y >= 0) board[y][x] = current.color;
+  clearLines();
+  current = next;
+  next = randomPiece();
+  if (!isValid(current)) { gameOver = true; showOverlay('GAME OVER', 'R: リスタート'); }
+}
+
+function clearLines() {
+  const full = board.filter(row => row.every(c => c));
+  const cleared = full.length;
+  if (!cleared) return;
+  board = [
+    ...Array.from({length: cleared}, () => Array(COLS).fill(0)),
+    ...board.filter(row => !row.every(c => c))
+  ];
+  lines += cleared;
+  score += [0, 100, 300, 500, 800][cleared] * level;
+  level = Math.floor(lines / 10) + 1;
+  fallSpeed = getFallSpeed();
+  updateInfo();
+}
+
+function move(dx, dy) {
+  const p = {...current, x: current.x + dx, y: current.y + dy};
+  if (isValid(p)) { current = p; return true; }
+  return false;
+}
+
+function rotate(dir) {
+  const rot = (current.rot + dir + 4) % 4;
+  for (const kick of [0, -1, 1, -2, 2]) {
+    const p = {...current, rot, x: current.x + kick};
+    if (isValid(p)) { current = p; return; }
+  }
+}
+
+function hardDrop() {
+  while (move(0, 1)) score += 2;
+  lock();
+  updateInfo();
+}
+
+function getGhost() {
+  let g = {...current};
+  while (true) {
+    const t = {...g, y: g.y + 1};
+    if (!isValid(t)) break;
+    g = t;
+  }
+  return getCells(g);
+}
+
+function drawCell(c, x, y, alpha) {
+  const color = COLORS[c];
+  ctx.globalAlpha = alpha ?? 1;
+  ctx.fillStyle = color;
+  ctx.fillRect(x * SZ, y * SZ, SZ - 1, SZ - 1);
+  if (alpha === undefined) {
+    // highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillRect(x * SZ, y * SZ, SZ - 1, 4);
+    ctx.fillRect(x * SZ, y * SZ, 4, SZ - 1);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(x * SZ, y * SZ + SZ - 5, SZ - 1, 4);
+    ctx.fillRect(x * SZ + SZ - 5, y * SZ, 4, SZ - 1);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function draw() {
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // grid lines
+  ctx.strokeStyle = '#222';
+  ctx.lineWidth = 1;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      ctx.strokeRect(c * SZ, r * SZ, SZ, SZ);
+    }
+  }
+
+  // board
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (board[r][c]) drawCell(board[r][c], c, r);
+
+  // ghost
+  for (const [x, y] of getGhost())
+    if (y >= 0) drawCell(current.color, x, y, 0.18);
+
+  // current
+  for (const [x, y] of getCells(current))
+    if (y >= 0) drawCell(current.color, x, y);
+
+  // next piece
+  nctx.fillStyle = '#1a1a1a';
+  nctx.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+  nctx.fillStyle = '#666';
+  nctx.font = '12px monospace';
+  nctx.fillText('NEXT', 8, 16);
+  const ns = 22;
+  const shape = next.shapes[0];
+  const offX = Math.floor((nextCanvas.width - shape[0].length * ns) / 2);
+  const offY = 20;
+  for (let r = 0; r < shape.length; r++)
+    for (let c = 0; c < shape[r].length; c++)
+      if (shape[r][c]) {
+        nctx.fillStyle = COLORS[next.color];
+        nctx.fillRect(offX + c * ns, offY + r * ns, ns - 1, ns - 1);
+      }
+}
+
+function updateInfo() {
+  document.getElementById('score').textContent = score;
+  document.getElementById('level').textContent = level;
+  document.getElementById('lines').textContent = lines;
+}
+
+function showOverlay(title, sub) {
+  document.getElementById('overlay-title').textContent = title;
+  document.getElementById('overlay-sub').textContent = sub;
+  overlay.style.display = 'flex';
+  // overlay をキャンバスに重ねる
+  overlay.style.position = 'absolute';
+  overlay.style.top = 0; overlay.style.left = 0;
+  overlay.style.width = canvas.width + 'px';
+  overlay.style.height = canvas.height + 'px';
+  overlay.style.background = 'rgba(0,0,0,0.6)';
+}
+
+// DAS
+const das = { left: false, right: false, timer: { left: 0, right: 0 } };
+const DAS_DELAY = 150, DAS_REPEAT = 50;
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'r' || e.key === 'R') { init(); return; }
+  if (gameOver) return;
+  if (e.key === 'p' || e.key === 'P') {
+    paused = !paused;
+    if (paused) showOverlay('PAUSE', 'P: 再開');
+    else overlay.style.display = 'none';
+    return;
+  }
+  if (paused) return;
+
+  switch (e.key) {
+    case 'ArrowLeft':  e.preventDefault(); move(-1, 0); das.left = true; das.timer.left = 0; break;
+    case 'ArrowRight': e.preventDefault(); move(1, 0);  das.right = true; das.timer.right = 0; break;
+    case 'ArrowDown':  e.preventDefault(); if (move(0, 1)) { score++; updateInfo(); } break;
+    case 'ArrowUp': case 'x': case 'X': e.preventDefault(); rotate(1); break;
+    case 'z': case 'Z': rotate(-1); break;
+    case ' ': e.preventDefault(); hardDrop(); break;
+  }
+});
+
+document.addEventListener('keyup', e => {
+  if (e.key === 'ArrowLeft')  das.left = false;
+  if (e.key === 'ArrowRight') das.right = false;
+});
+
+let last = null;
+function loop(ts) {
+  if (last === null) last = ts;
+  const dt = ts - last;
+  last = ts;
+
+  if (!gameOver && !paused) {
+    // DAS
+    for (const [dir, dx] of [['left', -1], ['right', 1]]) {
+      if (das[dir]) {
+        das.timer[dir] += dt;
+        if (das.timer[dir] >= DAS_DELAY) {
+          move(dx, 0);
+          das.timer[dir] = DAS_DELAY - DAS_REPEAT;
+        }
+      }
+    }
+
+    fallTimer += dt;
+    if (fallTimer >= fallSpeed) {
+      fallTimer = 0;
+      if (!move(0, 1)) lock();
+      updateInfo();
+    }
+  }
+
+  draw();
+  requestAnimationFrame(loop);
+}
+
+init();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
